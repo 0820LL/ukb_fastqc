@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import logging
 import os
 import json
 import time
@@ -16,11 +17,9 @@ def steward(config_file_path:str, ukb_fastqc_path:str, send_message_script:str) 
     # get paramters from the config.json
     with open(config_file_path, 'r') as config_f:
         config_d = json.load(config_f)
-    task_id = config_d['taskId']
-    analysis_record_id = config_d['analysisRecordId']
     params_d = {
-        'reads':config_d['reads'],
-        'threads_num':config_d['threads_num']
+        'reads'      : config_d['ukbParams']['reads'],
+        'threads_num': config_d['ukbParams']['threads_num']
     }
     # make the params.json file
     params_file_path = '{}/params.json'.format(analysis_path)
@@ -28,30 +27,31 @@ def steward(config_file_path:str, ukb_fastqc_path:str, send_message_script:str) 
         json.dump(params_d, params_f, ensure_ascii=False, indent=4)
     ukb_fastqc_command = 'nextflow run -offline -profile singularity -bg -params-file {} {} >> run_log.txt'.format(params_file_path, ukb_fastqc_path)
     return_value = os.system(ukb_fastqc_command)
-    with open('ukb_fastqc_command.txt', 'w') as command_f:
-        command_f.write(ukb_fastqc_command + '\n')
-        command_f.write('return value:{}\n'.format(str(return_value)))
+    logging.info(ukb_fastqc_command)
+    logging.info('return value:{}\n'.format(str(return_value)))
     time.sleep(5)
     # send the result files 
     feedback_dict = {
-        'tTaskId': task_id,
-        'analysisRecordId': analysis_record_id,
-        'pipelineName': 'ukb_fastqc',
+        'uuid'          : config_d['uuid'],
+        'ukbId'         : config_d['ukbId'],
+        'ukbToolsCode'  : config_d['ukbToolsCode'],
+        'ukbToolName'   : config_d['ukbToolName'],
+        'pipeline'      : 'ukb',
         'analysisStatus': '',
-        'startDate': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
-        'endDate': '',
-        'error': 0,
-        'taskName': 'Step'
+        'startDate'     : time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
+        'endDate'       : '',
+        'error'         : 0,
+        'taskName'      : 'Step'
     }
     if return_value == 0 and os.path.exists('{}/results'.format(analysis_path)):
         feedback_dict['analysisStatus'] = '分析开始'
-        feedback_dict['endDate'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-        feedback_dict['error'] = 0
+        feedback_dict['endDate']        = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        feedback_dict['error']          = 0
         send_json_message(analysis_path, send_message_script, feedback_dict, 'start.json')
     else:
         feedback_dict['analysisStatus'] = '分析开始'
-        feedback_dict['endDate'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-        feedback_dict['error'] = 1
+        feedback_dict['endDate']        = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        feedback_dict['error']          = 1
         send_json_message(analysis_path, send_message_script, feedback_dict, 'start.json')
     flag = 0
     while True:
@@ -67,10 +67,10 @@ def steward(config_file_path:str, ukb_fastqc_path:str, send_message_script:str) 
                 break
         time.sleep(5)
     feedback_dict['analysisStatus'] = '分析结果'
-    feedback_dict['endDate'] = ''
-    feedback_dict['taskName'] = 'Result'
-    feedback_dict['error'] = 0
-    feedback_dict['data'] = []
+    feedback_dict['endDate']        = ''
+    feedback_dict['taskName']       = 'Result'
+    feedback_dict['error']          = 0
+    feedback_dict['data']           = []
     flag = 0
     while True:
         with open(execution_trace_file, encoding = 'UTF-8') as trace_f:
@@ -85,28 +85,28 @@ def steward(config_file_path:str, ukb_fastqc_path:str, send_message_script:str) 
                             if file.endswith('zip'):
                                 fastqc_res_zip = '{}/results/{}'.format(analysis_path, file)
                         report_download_dict = {
-                            'sort': 1, 
-                            'title': '分析结果文件', 
-                            'text': [
+                            'sort' : 1,
+                            'title': '分析结果文件',
+                            'text' : [
                                 {
-                                    'sort':1,
-                                    'title': '分析结果报告',
-                                    'content': '分析结果报告：#&{}'.format(fastqc_res_html), 
-                                    'postDes': '', 
-                                    'memo': '', 
-                                    'preDes': ''
+                                    'sort'   : 1,
+                                    'title'  : '分析结果报告',
+                                    'content': '分析结果报告：#&{}'.format(fastqc_res_html),
+                                    'postDes': '',
+                                    'memo'   : '',
+                                    'preDes' : ''
                                 },
                                 {
-                                    'sort':1,
-                                    'title': '详细分析结果',
-                                    'content': '详细分析结果：#&{}'.format(fastqc_res_zip), 
-                                    'postDes': '', 
-                                    'memo': '', 
-                                    'preDes': ''
+                                    'sort'   : 1,
+                                    'title'  : '详细分析结果',
+                                    'content': '详细分析结果：#&{}'.format(fastqc_res_zip),
+                                    'postDes': '',
+                                    'memo'   : '',
+                                    'preDes' : ''
                                 },
                             ], 
-                            'memo': '', 
-                            'subtitle1': '', 
+                            'memo'     : '',
+                            'subtitle1': '',
                             'subtitle2': ''
                         }
                         feedback_dict['data'].append(report_download_dict)
@@ -129,8 +129,15 @@ def main() -> None:
     parser.add_argument('--send_message_script', required=True, help='the full path for the shell script: sendMessage.sh')
     args = parser.parse_args()
     config_file_path = args.cfp
+    if os.path.isabs(config_file_path):
+        pass
+    else:
+        config_file_path = os.path.abspath(os.path.basename(config_file_path))
     ukb_fastqc_path = args.ukb_fastqc_path
     send_message_script = args.send_message_script
+    # logging
+    log_file = '{}/ukb_fastqc.log'.format(os.path.dirname(config_file_path))
+    logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     steward(config_file_path, ukb_fastqc_path, send_message_script)
 
 
